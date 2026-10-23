@@ -29,23 +29,58 @@ mkdir -p "$STATE" && chmod 700 "$STATE"
 [[ -n ${GOOGLE_EMAIL:-} ]] || read -rp "Google account email to use for NotebookLM: " GOOGLE_EMAIL
 [[ $BOT_TOKEN == *:* ]] || die "That doesn't look like a Telegram bot token."
 printf 'BOT_TOKEN=%q\nGOOGLE_EMAIL=%q\n' "$BOT_TOKEN" "$GOOGLE_EMAIL" > "$STATE/config"
+[[ -z ${PROJECT:-} ]] || printf 'PROJECT=%q\n' "$PROJECT" >>"$STATE/config"
 chmod 600 "$STATE/config"
 
 # ---------------------------------------------------------------- project + billing
-PROJECT=$(gcloud config get-value project 2>/dev/null || true)
-if [[ -z $PROJECT ]]; then
-  PROJECT=podcast-maker-$(tr -dc a-z0-9 </dev/urandom | head -c6 || true)
-  say "Creating Google Cloud project $PROJECT"
-  gcloud projects create "$PROJECT" --name="Podcast Maker"
-  gcloud config set project "$PROJECT"
+# pick NAME... : prints a numbered menu of the arguments and echoes the chosen one.
+pick() {
+  local i=1 choice
+  for opt in "$@"; do printf '  %d) %s\n' "$i" "$opt" >&2; i=$((i + 1)); done
+  while :; do
+    read -rp "Choose 1-$#: " choice
+    [[ $choice =~ ^[0-9]+$ ]] && ((choice >= 1 && choice <= $#)) && { echo "${!choice}"; return; }
+  done
+}
+
+if [[ -z ${PROJECT:-} ]]; then
+  NEW="Create a new project just for this (recommended)"
+  mapfile -t PROJECTS < <(gcloud projects list --format='value(projectId)' 2>/dev/null)
+  if ((${#PROJECTS[@]})); then
+    say "Which Google Cloud project should the bot live in?"
+    PROJECT=$(pick "$NEW" "${PROJECTS[@]}")
+  else
+    PROJECT=$NEW
+  fi
+  if [[ $PROJECT == "$NEW" ]]; then
+    PROJECT=podcast-maker-$(tr -dc a-z0-9 </dev/urandom | head -c6 || true)
+    say "Creating Google Cloud project $PROJECT"
+    gcloud projects create "$PROJECT" --name="Podcast Maker"
+  fi
+  printf 'PROJECT=%q\n' "$PROJECT" >>"$STATE/config"
 fi
+gcloud config set project "$PROJECT" >/dev/null 2>&1
 say "Using project $PROJECT"
+
 if [[ $(gcloud billing projects describe "$PROJECT" --format='value(billingEnabled)') != True ]]; then
-  ACCOUNT=$(gcloud billing accounts list --filter=open=true --format='value(name)' --limit=1)
-  [[ -n $ACCOUNT ]] || die "No billing account found. Create one at
-https://console.cloud.google.com/billing (the free tier still needs a card on file), then re-run."
-  gcloud billing projects link "$PROJECT" --billing-account="$ACCOUNT"
+  mapfile -t ACCOUNTS < <(gcloud billing accounts list --filter=open=true \
+    --format='value(name.basename(),displayName)' 2>/dev/null | tr '\t' ' ')
+  if ((${#ACCOUNTS[@]} == 0)); then
+    die "Your Google account has no billing account yet. Google requires one (with a card)
+even for the free tier; you won't be charged for the free VM.
+
+  1. Open https://console.cloud.google.com/billing/create and create one.
+  2. Come back here and run the same command again. It picks up where it left off."
+  elif ((${#ACCOUNTS[@]} == 1)); then
+    ACCOUNT=${ACCOUNTS[0]}
+  else
+    say "Which billing account should pay for (free-tier) usage?"
+    ACCOUNT=$(pick "${ACCOUNTS[@]}")
+  fi
+  say "Linking billing account ${ACCOUNT#* } to $PROJECT"
+  gcloud billing projects link "$PROJECT" --billing-account="${ACCOUNT%% *}" >/dev/null
 fi
+say "Enabling the Compute Engine API (takes a minute the first time)"
 gcloud services enable compute.googleapis.com
 
 # ---------------------------------------------------------------- Google sign-in
