@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.podcast-tmp/
+*.m4a
+.env
+notebooklm-auth/

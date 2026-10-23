@@ -1,0 +1,13 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Holds the Google credential (profiles/default/master_token.json and/or
+      # storage_state.json). Must be writable: refreshed cookies are saved here.
+      - ./notebooklm-auth:/data/notebooklm
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"

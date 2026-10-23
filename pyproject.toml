@@ -1,0 +1,26 @@
+[project]
+name = "podcast-maker"
+version = "0.1.0"
+description = "Telegram bot that turns a topic into a NotebookLM podcast"
+requires-python = ">=3.11"
+dependencies = [
+    "notebooklm-py[headless]==0.8.5",
+    "python-telegram-bot==22.8",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+podcast-bot = "podcast_maker.bot:main"
+podcast = "podcast_maker.cli:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["podcast_maker"]
