@@ -4,9 +4,9 @@ services:
     restart: unless-stopped
     env_file: .env
     volumes:
-      # Holds the Google credential (profiles/default/master_token.json and/or
-      # storage_state.json). Must be writable: refreshed cookies are saved here.
-      - ./notebooklm-auth:/data/notebooklm
+      # Bot state (owner.json) and the Google credential under
+      # notebooklm/profiles/default/. Must be writable: refreshed cookies are saved here.
+      - ./data:/data
     logging:
       options:
         max-size: "10m"

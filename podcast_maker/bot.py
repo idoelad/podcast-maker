@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import tempfile
@@ -31,6 +32,11 @@ HELP = (
     "• https://en.wikipedia.org/wiki/Tensegrity explain the core idea"
 )
 
+NO_AUTH = (
+    "I'm not signed in to Google yet. Re-run the setup command in Google Cloud Shell "
+    "(see the README) and complete the sign-in step."
+)
+
 KEYBOARD = InlineKeyboardMarkup(
     [
         [InlineKeyboardButton(f"🇬🇧 {label}", callback_data=f"en:{length}")
@@ -48,20 +54,41 @@ def parse_choice(data: str) -> tuple[str, str]:
     return language, length
 
 
+def _owner_file() -> Path:
+    return Path(os.environ.get("DATA_DIR", "/data")) / "owner.json"
+
+
 def allowed_ids() -> set[int]:
     raw = os.environ.get("TELEGRAM_ALLOWED_USER_IDS", "")
-    return {int(x) for x in raw.replace(" ", "").split(",") if x}
+    ids = {int(x) for x in raw.replace(" ", "").split(",") if x}
+    try:
+        ids.add(json.loads(_owner_file().read_text())["user_id"])
+    except (OSError, ValueError, KeyError):
+        pass
+    return ids
+
+
+def has_credentials() -> bool:
+    home = Path(os.environ.get("NOTEBOOKLM_HOME", Path.home() / ".notebooklm"))
+    profile = home / "profiles" / "default"
+    return (profile / "master_token.json").exists() or (profile / "storage_state.json").exists()
 
 
 async def _guard(update: Update) -> bool:
     user = update.effective_user
-    if user and user.id in allowed_ids():
+    if not user:
+        return False
+    ids = allowed_ids()
+    if not ids:
+        # First person to talk to a fresh bot becomes its owner.
+        _owner_file().parent.mkdir(parents=True, exist_ok=True)
+        _owner_file().write_text(json.dumps({"user_id": user.id}))
+        log.info("Claimed by Telegram user %s", user.id)
+        await update.effective_message.reply_text("👋 You're now this bot's owner. Only you can use it.")
         return True
-    if update.effective_message:
-        await update.effective_message.reply_text(
-            f"Sorry, this is a private bot. (Your user ID is {user.id if user else '?'} — "
-            "add it to TELEGRAM_ALLOWED_USER_IDS if this is your bot.)"
-        )
+    if user.id in ids:
+        return True
+    await update.effective_message.reply_text("Sorry, this is a private bot.")
     return False
 
 
@@ -85,6 +112,9 @@ async def on_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     topic = context.user_data.pop("topic", None)
     if not topic:
         await query.edit_message_text("Send me a topic first.")
+        return
+    if not has_credentials():
+        await query.edit_message_text(NO_AUTH)
         return
     language, length = parse_choice(query.data)
     req = PodcastRequest(topic=topic, language=language, length=length)
@@ -120,7 +150,10 @@ async def _run_job(status_msg, req: PodcastRequest, context: ContextTypes.DEFAUL
                 await status_msg.edit_text(f"{label}\n\n✅ Done — enjoy the ride!")
             except Exception as e:
                 log.exception("Job failed")
-                await status_msg.edit_text(f"{label}\n\n❌ Failed: {e}")
+                hint = ""
+                if "auth" in str(e).lower() or "login" in str(e).lower():
+                    hint = "\n\nLooks like a Google sign-in problem. " + NO_AUTH
+                await status_msg.edit_text(f"{label}\n\n❌ Failed: {e}{hint}")
 
 
 def main() -> None:

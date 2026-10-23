@@ -1,6 +1,6 @@
 .venv
 .git
 .env
-notebooklm-auth
+data
 tests
 *.m4a

@@ -5,5 +5,5 @@ __pycache__/
 .podcast-tmp/
 *.m4a
 .env
-notebooklm-auth/
+data/
 build/
